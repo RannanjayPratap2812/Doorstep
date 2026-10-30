@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Doorstep</title>
+<meta name="theme-color" content="#14363a">
+<meta name="description" content="A checklist app that reminds you before you leave the house.">
+<link rel="icon" type="image/svg+xml" id="ico" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='112' fill='%2314363a'/%3E%3Cpath d='M164 436V204c0-52 38-92 92-92s92 40 92 92v232z' fill='%23f4efe6'/%3E%3Cpath d='M164 436h184' stroke='%23e8b04a' stroke-width='20' stroke-linecap='round'/%3E%3Ccircle cx='312' cy='300' r='16' fill='%23e8b04a'/%3E%3Cpath d='M214 252l30 30 56-64' fill='none' stroke='%2314363a' stroke-width='22' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" id="touch" href="">
+<style>
+:root{--bg:#f4efe6;--card:#fffdf8;--ink:#17262a;--mute:#5d6b6c;--door:#14363a;--brass:#9a6a10;--brass-bg:#e8b04a;--line:#d9d2c3;--ok:#2f7a4f;--bad:#b3392f;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1d20;--card:#16292d;--ink:#eee8da;--mute:#9db0b0;--door:#e8b04a;--brass:#e8b04a;--line:#2a4246;--ok:#6cc08d;--bad:#ef8a80;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 ui-rounded,"Avenir Next",system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:560px;margin:0 auto;padding:16px 16px 96px}
+h1{font:700 28px/1.1 Georgia,"Iowan Old Style",serif;margin:8px 0 2px}
+h2{font-size:18px;margin:0}
+p{margin:4px 0}.mute{color:var(--mute);font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin:12px 0}
+.card.done{opacity:.7}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.item{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line);min-height:44px;cursor:pointer}
+.item input{width:22px;height:22px;accent-color:var(--ok)}
+.item.on span{text-decoration:line-through;color:var(--mute)}
+.tag{font-size:12px;color:var(--brass);margin-left:auto}
+button,select,input,textarea{font:inherit;color:inherit}
+button{background:var(--door);color:var(--bg);border:0;border-radius:12px;padding:10px 14px;min-height:44px;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button.small{padding:6px 10px;min-height:36px;font-size:14px}
+input[type=text],input[type=number],input[type=time],input[type=password],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;margin:4px 0 10px}
+label{font-size:14px;color:var(--mute)}
+nav{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);display:flex;justify-content:center;gap:8px;padding:8px 8px calc(8px + env(safe-area-inset-bottom))}
+nav button{flex:1;max-width:180px;background:transparent;color:var(--mute)}
+nav button[aria-current=true]{background:var(--door);color:var(--bg)}
+:focus-visible{outline:3px solid var(--brass-bg);outline-offset:2px}
+dialog{border:1px solid var(--line);border-radius:18px;background:var(--card);color:var(--ink);width:min(520px,94vw);max-height:90vh}
+dialog::backdrop{background:#0008}
+.days{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.days label{display:flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:10px;padding:6px 10px;color:var(--ink)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:90px;background:var(--door);color:var(--bg);padding:10px 16px;border-radius:12px;max-width:90vw;z-index:9}
+.bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden}.bar i{display:block;height:100%;background:var(--brass-bg)}
+@media(prefers-reduced-motion:no-preference){.item input{transition:transform .1s}.item input:active{transform:scale(1.2)}}
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"></main>
+<nav aria-label="Main"><button data-t="today">Today</button><button data-t="places">My week</button><button data-t="settings">Settings</button></nav>
+<dialog id="dlg"></dialog>
+<script>
+const $=s=>document.querySelector(s),DAYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9);
+const dkey=(d=new Date())=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const mkey=()=>dkey().slice(0,7);
+const eom=(off=0)=>{const d=new Date();return dkey(new Date(d.getFullYear(),d.getMonth()+off+1,0))};
+const fmt=k=>new Date(k+'T00:00').toLocaleDateString(undefined,{day:'numeric',month:'short'});
+const sched=p=>p.sched||(p.sched=Object.fromEntries((p.days||[]).map(d=>[d,p.time||'07:40'])));
+const expired=()=>S.places.filter(p=>p.until&&p.until<dkey());
+const ending=()=>S.places.filter(p=>p.until&&p.until>=dkey()&&(new Date(p.until+'T00:00')-new Date(dkey()+'T00:00'))/864e5<=3);
+function banner(){const ex=expired(),en=ending();if(!ex.length&&!en.length)return'';
+const t=ex.length?eom():eom(1);
+return`<div class="card" style="border-color:var(--brass)"><b>${ex.length?'New month: review your places':'Your schedule ends soon'}</b><p class="mute">${ex.length?ex.map(p=>esc(p.name)).join(', ')+' ended. They stay saved but will not remind you until you renew them.':en.map(p=>esc(p.name)).join(', ')+' end on '+fmt(en[0].until)+'.'} Change times if they changed, or keep everything as it is.</p><div class="row"><button onclick="keepAll()">Keep all until ${fmt(t)}</button><button class="ghost" onclick="tab='places';render()">Review places</button></div></div>`}
+function keepAll(){const t=expired().length?eom():eom(1);S.places.forEach(p=>{if(p.until&&(p.until<dkey()||ending().includes(p)))p.until=t});persist();render();toast('Schedule kept until '+fmt(t))}
+/* ---------- storage ---------- */
+function load(k,d){try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{toast('Could not save. Storage may be full or blocked.')}}
+let S=load('ds_state',{home:null,never:['Keys','Wallet','Phone','Charger'],places:[],ticks:{},fired:{},snooze:{},events:[],locOn:false,noCalAI:true});
+let K=load('ds_ai',{provider:'anthropic',key:'',model:'claude-haiku-4-5',cap:30,count:0,month:mkey()}); // key kept apart from state, never exported
+const persist=()=>save('ds_state',S),persistK=()=>save('ds_ai',K);
+const MODELS={anthropic:'claude-haiku-4-5',openai:'gpt-4o-mini',google:'gemini-2.5-flash'};
+let tab='today',W=null;
+function toast(m){const t=document.createElement('div');t.className='toast';t.setAttribute('role','status');t.textContent=m;document.body.append(t);setTimeout(()=>t.remove(),3800)}
+/* ---------- icon / manifest (built at runtime from the inline SVG) ---------- */
+(function(){const href=$('#ico').href;
+const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=c.height=180;c.getContext('2d').drawImage(img,0,0,180,180);$('#touch').href=c.toDataURL('image/png')};img.src=href;
+const m={name:'Doorstep',short_name:'Doorstep',start_url:'./',display:'standalone',background_color:'#f4efe6',theme_color:'#14363a',icons:[{src:href,sizes:'any',type:'image/svg+xml',purpose:'any'}]};
+const l=document.createElement('link');l.rel='manifest';l.href=URL.createObjectURL(new Blob([JSON.stringify(m)],{type:'application/manifest+json'}));document.head.append(l);
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{})})();
+/* ---------- weather (forecast for the time you are out) ---------- */
+async function loadWeather(){if(!S.home)return;try{const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${S.home.lat}&longitude=${S.home.lon}&hourly=temperature_2m,precipitation_probability&forecast_days=2&timezone=auto`);if(!r.ok)throw 0;W=await r.json();render()}catch{W=null}}
+function weatherItems(time,hours=5){if(!W||!time)return[];const [h,m]=time.split(':').map(Number),out=[],H=W.hourly,today=dkey(),now=new Date();
+const rows=H.time.map((t,i)=>({t,i})).filter(({t})=>t.startsWith(today)&&+t.slice(11,13)>=h&&+t.slice(11,13)<=h+hours);if(!rows.length)return[];
+let rain=rows.filter(({i})=>H.precipitation_probability[i]>=40),tmin=Math.min(...rows.map(({i})=>H.temperature_2m[i])),tmax=Math.max(...rows.map(({i})=>H.temperature_2m[i]));
+if(rain.length)out.push({t:`Rain at ${rain[0].t.slice(11,16)}: take a coat and umbrella`,tag:'weather'});
+if(tmin<=6)out.push({t:`Cold (${Math.round(tmin)}°C): hat and gloves`,tag:'weather'});
+if(tmax>=26)out.push({t:`Hot (${Math.round(tmax)}°C): water and sun cream`,tag:'weather'});return out}
+/* ---------- cards ---------- */
+function cardsToday(){const d=new Date(),wd=d.getDay(),dk=dkey(),c=[];
+S.places.filter(p=>sched(p)[wd]&&(!p.until||p.until>=dk)).forEach(p=>{const t=sched(p)[wd];c.push({id:p.id,title:p.name,time:t,items:buildItems(p.items,t,p.returns)})});
+S.events.filter(e=>e.date===dk).forEach(e=>c.push({id:'ev'+e.id,title:e.title,time:e.time,items:buildItems(e.items||[],e.time,[])}));
+return c.sort((a,b)=>(a.time||'').localeCompare(b.time||''))}
+function buildItems(items,time,returns){return[...S.never.map(t=>({t,tag:'always'})),...items.map(t=>({t,tag:''})),...weatherItems(time),...(returns||[]).map(t=>({t,tag:'return'})),{t:'Did you lock up?',tag:'last'}]}
+const ticked=(cid)=>S.ticks[dkey()+'|'+cid]||{};
+function left(c){const t=ticked(c.id);return c.items.filter(i=>!t[i.t])}
+/* ---------- views ---------- */
+function render(){document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-current',b.dataset.t===tab));
+({today:vToday,places:vPlaces,settings:vSettings})[tab]()}
+function vToday(){const cs=cardsToday();let h=`<h1>Today</h1><p class="mute">${new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'})}</p>`;
+h+=banner();
+if(!S.home)h+=`<div class="card"><b>Set your home first.</b><p class="mute">Needed for the weather check and the leaving-home alert.</p><button onclick="tab='settings';render()">Open settings</button></div>`;
+if(!S.places.length)h+=`<div class="card"><b>Set up your week once.</b><p class="mute">Add your places and the times you leave for the whole week. It repeats every week until the month ends, so you never set it day by day.</p><button onclick="tab='places';render()">Set up my week</button></div>`;
+else if(!cs.length)h+=`<div class="card"><b>Nothing scheduled for today.</b><p class="mute">Your weekly schedule is saved and keeps running${S.places.some(p=>p.until)?' until '+fmt(S.places.map(p=>p.until).filter(Boolean).sort().pop()):''}. Today just has no outings in it.</p><button class="ghost" onclick="tab='places';render()">See my week</button></div>`;
+cs.forEach(c=>{const l=left(c),done=!l.length,n=c.items.length,pc=Math.round((n-l.length)/n*100);
+h+=`<section class="card ${done?'done':''}" aria-label="${esc(c.title)}"><div class="row"><h2>${esc(c.title)}</h2><span class="mute">${esc(c.time||'')}</span></div><div class="bar" role="progressbar" aria-valuenow="${pc}" aria-valuemin="0" aria-valuemax="100" style="margin:8px 0"><i style="width:${pc}%"></i></div>`;
+c.items.forEach(i=>{const on=!!ticked(c.id)[i.t];h+=`<label class="item ${on?'on':''}"><input type="checkbox" ${on?'checked':''} data-c="${c.id}" data-i="${esc(i.t)}"><span>${esc(i.t)}</span>${i.tag&&i.tag!=='last'?`<em class="tag">${i.tag}</em>`:''}</label>`});
+h+=`<div class="row" style="margin-top:10px"><span class="mute">${done?'All done. No reminder will fire.':l.length+' left'}</span>${done?'':`<button class="ghost small" data-snooze="${c.id}">Snooze 5 min</button>`}</div></section>`});
+h+=`<div class="card"><div class="row"><b>Calendar</b><button class="ghost small" onclick="calDlg()">Connect calendar</button></div><p class="mute">${S.events.length?S.events.length+' upcoming events imported.':'Optional. Bring in events so appointments get their own checklist.'}</p></div>`;
+$('#app').innerHTML=h}
+function vPlaces(){let h=`<div class="row"><h1>My week</h1><button onclick="editPlace()">Add place</button></div><p class="mute">Set this once. It repeats every week until the month ends.</p>`+banner();
+if(!S.places.length)h+=`<div class="card"><p>Add school, gym, work, football or a relative's house, with the days and time you leave for each.</p></div>`;
+else{h+=`<div class="card">`;[1,2,3,4,5,6,0].forEach(d=>{const sl=S.places.filter(p=>sched(p)[d]).map(p=>({p,t:sched(p)[d]})).sort((a,b)=>a.t.localeCompare(b.t));
+h+=`<div class="item" style="cursor:default;align-items:flex-start"><b style="min-width:44px;padding-top:6px">${DAYS[d]}</b><div>${sl.length?sl.map(x=>`<button class="ghost small" style="margin:2px 4px 2px 0" onclick="editPlace('${x.p.id}')">${esc(x.t)} ${esc(x.p.name)}${x.p.until&&x.p.until<dkey()?' (ended)':''}</button>`).join(''):'<span class="mute" style="line-height:36px">Nothing</span>'}</div></div>`});h+='</div>'}
+$('#app').innerHTML=h}
+function vSettings(){const home=S.home?`${S.home.lat.toFixed(3)}, ${S.home.lon.toFixed(3)}`:'Not set';
+$('#app').innerHTML=`<h1>Settings</h1>
+<div class="card"><h2>Home</h2><p class="mute">Saved on this device only: ${home}</p><button onclick="setHome()">Use my current location</button></div>
+<div class="card"><h2>Never-forget items</h2><p class="mute">Shown on every card. One per line.</p><textarea id="never" rows="4">${esc(S.never.join('\n'))}</textarea><button onclick="S.never=lines($('#never').value);persist();toast('Saved')">Save items</button></div>
+<div class="card"><h2>Notifications</h2><p class="mute">Status: ${'Notification' in window?Notification.permission:'not supported'}. Reminders fire 10 minutes before your leaving time while the app is open or installed.</p><button onclick="askNotif()">Allow notifications</button>
+<hr style="border:0;border-top:1px solid var(--line);margin:14px 0"><label class="row" style="color:var(--ink)"><span>Leaving-home alert (optional)<br><small class="mute">Asks for location. Works while the app is open.</small></span><input type="checkbox" ${S.locOn?'checked':''} onchange="toggleLoc(this.checked)" style="width:24px;height:24px"></label></div>
+<div class="card"><h2>AI key (optional, bring your own)</h2>
+<p style="margin:6px 0"><b>Doorstep has no built-in AI.</b> AI features only work with your own key, so they only ever use your own quota. Without a key, everything else still works offline.</p>
+<p class="mute">Your key is stored only in this browser and sent only to the provider you choose. This web app cannot use the iOS Keychain or Android Keystore. Requests go to the provider under its own terms (Anthropic, OpenAI or Google). Google AI Studio keys come from aistudio.google.com/apikey. Use a dedicated key with a spending limit set at the provider.</p>
+<label>Provider<select id="prov" onchange="K.provider=this.value;K.model=MODELS[this.value];persistK();render()"><option value="anthropic" ${K.provider==='anthropic'?'selected':''}>Anthropic</option><option value="openai" ${K.provider==='openai'?'selected':''}>OpenAI</option><option value="google" ${K.provider==='google'?'selected':''}>Google AI Studio (Gemini)</option></select></label>
+<label>Key<input type="password" id="key" autocomplete="off" value="${esc(K.key)}" placeholder="Paste your key"></label>
+<label>Model<input type="text" id="model" value="${esc(K.model)}"></label>
+<label>Monthly app request cap<input type="number" id="cap" min="1" value="${K.cap}"></label>
+<div class="row"><button onclick="saveKey()">Save</button><button class="ghost" onclick="testKey()">Test key</button><button class="ghost" onclick="K.key='';persistK();render();toast('Key removed')">Remove</button></div>
+<p class="mute" style="margin-top:10px">App usage: ${K.month===mkey()?K.count:0} of ${K.cap} AI requests this month. This counts requests from this app only, not your provider bill.</p>
+<label class="row" style="color:var(--ink)"><span>Never send calendar event titles to AI</span><input type="checkbox" ${S.noCalAI?'checked':''} onchange="S.noCalAI=this.checked;persist()" style="width:24px;height:24px"></label>
+<p class="mute">Only the place name or event title is sent. Never your home location.</p></div>`}
+const lines=v=>v.split('\n').map(s=>s.trim()).filter(Boolean);
+/* ---------- place editor ---------- */
+function editPlace(id){const p=S.places.find(x=>x.id===id)||{id:uid(),name:'',items:[],returns:[],days:[1,2,3,4,5],time:'07:40',line:'',until:eom()};
+const sc=sched(p);const d=$('#dlg');d.innerHTML=`<form method="dialog" id="pf"><h2>${id?'Edit':'New'} place</h2>
+<label>Name<input type="text" id="pn" value="${esc(p.name)}" placeholder="School"></label>
+<label>Items to take (one per line)<textarea id="pi" rows="5">${esc(p.items.join('\n'))}</textarea></label>
+<label>Return reminders (one per line)<textarea id="pr" rows="2" placeholder="Library book is due back">${esc((p.returns||[]).join('\n'))}</textarea></label>
+<p class="mute">Tick the days you go and set a time for each.</p>
+<div class="row" style="margin-bottom:8px"><button type="button" class="ghost small" id="wk">Mon to Fri</button><button type="button" class="ghost small" id="ev">Every day</button><input type="time" id="all" value="${p.time||'07:40'}" style="width:auto;margin:0"><button type="button" class="ghost small" id="ap">Same time for ticked days</button></div>
+<div id="wd" style="margin-bottom:12px">${[1,2,3,4,5,6,0].map(i=>`<div class="row" style="margin:4px 0"><label style="color:var(--ink);display:flex;gap:8px;align-items:center"><input type="checkbox" data-d="${i}" ${sc[i]?'checked':''} style="width:22px;height:22px">${DAYS[i]}</label><input type="time" data-t="${i}" value="${sc[i]||p.time||'07:40'}" style="width:auto;margin:0"></div>`).join('')}</div>
+<label>Active until<input type="date" id="pu" value="${p.until||''}"></label><p class="mute" style="margin:-6px 0 12px">Set once for the month. Doorstep asks you to review at the start of the next one. Leave blank to keep it running.</p>
+<div class="row" style="margin-bottom:12px"><button type="button" class="ghost small" id="aiI" ${K.key?'':'title="Needs your own AI key in Settings"'}>Suggest items (AI${K.key?'':', needs your key'})</button><button type="button" class="ghost small" id="aiL">Write reminder line (AI${K.key?'':', needs your key'})</button></div>
+<div class="row"><button type="button" id="ps">Save</button>${id?'<button type="button" class="ghost" id="pd">Delete</button>':''}<button type="button" class="ghost" onclick="$('#dlg').close()">Cancel</button></div></form>`;
+d.showModal();
+const ck=n=>d.querySelector(`[data-d="${n}"]`),tm=n=>d.querySelector(`[data-t="${n}"]`),A=[0,1,2,3,4,5,6];
+$('#wk').onclick=()=>A.forEach(i=>ck(i).checked=i>=1&&i<=5);$('#ev').onclick=()=>A.forEach(i=>ck(i).checked=true);
+$('#ap').onclick=()=>A.forEach(i=>{if(ck(i).checked)tm(i).value=$('#all').value});
+$('#aiI').onclick=async()=>{const n=$('#pn').value.trim();if(!n)return toast('Enter a place name first');const r=await ai(`List up to 8 short items a person should bring when going to: ${n}. One item per line. No numbering, no extra text.`);if(r){const cur=lines($('#pi').value);$('#pi').value=[...new Set([...cur,...lines(r).map(s=>s.replace(/^[-*•\d.\s]+/,''))])].join('\n')}};
+$('#aiL').onclick=async()=>{const n=$('#pn').value.trim();if(!n)return toast('Enter a place name first');const r=await ai(`Write one friendly reminder line under 12 words for someone about to leave for: ${n}. Items: ${$('#pi').value.replace(/\n/g,', ')}. Reply with the line only.`);if(r){p.line=r.trim();toast('Saved line: '+p.line)}};
+$('#ps').onclick=()=>{const name=$('#pn').value.trim();if(!name)return toast('Enter a place name');if(!A.some(i=>ck(i).checked))return toast('Tick at least one day');
+Object.assign(p,{name,items:lines($('#pi').value),returns:lines($('#pr').value),sched:Object.fromEntries(A.filter(i=>ck(i).checked).map(i=>[i,tm(i).value||'07:40'])),until:$('#pu').value});
+if(!S.places.includes(p))S.places.push(p);persist();d.close();render()};
+if(id)$('#pd').onclick=()=>{S.places=S.places.filter(x=>x!==p);persist();d.close();render()}}
+/* ---------- AI (optional, BYOK) ---------- */
+async function ai(prompt){if(!K.key)return toast('Add an AI key in Settings first'),null;
+if(K.month!==mkey()){K.month=mkey();K.count=0}
+if(K.count>=K.cap)return toast('Monthly app cap reached. Raise it in Settings.'),null;
+try{let r,j,txt;
+if(K.provider==='anthropic'){r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':K.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:K.model,max_tokens:300,messages:[{role:'user',content:prompt}]})});j=await r.json();txt=j.content?.[0]?.text}
+else if(K.provider==='google'){r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(K.model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':K.key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:800}})});j=await r.json();txt=j.candidates?.[0]?.content?.parts?.map(x=>x.text||'').join('')}
+else{r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer '+K.key},body:JSON.stringify({model:K.model,max_tokens:300,messages:[{role:'user',content:prompt}]})});j=await r.json();txt=j.choices?.[0]?.message?.content}
+if(!r.ok||!txt)throw 0;K.count++;persistK();return txt}
+catch{toast('Key invalid or out of credit. Using normal mode.');return null}}
+function saveKey(){K.key=$('#key').value.trim();K.model=$('#model').value.trim()||K.model;K.cap=Math.max(1,+$('#cap').value||30);persistK();toast('Saved')}
+async function testKey(){saveKey();const r=await ai('Reply with the single word: ok');if(r)toast('Key works')}
+/* ---------- calendar ---------- */
+function calDlg(){const d=$('#dlg');d.innerHTML=`<h2>Connect your calendar</h2>
+<p class="mute">Browsers can't read your phone's calendar directly. Pick the easiest route:</p>
+<h2 style="font-size:16px;margin-top:12px">iPhone: one tap with Shortcuts</h2>
+<ol class="mute" style="padding-left:20px"><li>Make a shortcut: <a href="shortcuts://create-shortcut" style="color:var(--brass)">open Shortcuts</a>.</li><li>Add <b>Find Calendar Events</b> (start date is today, or next 7 days).</li><li>Add <b>Repeat with Each</b>. Inside it add <b>Text</b>: the start date formatted as <b>yyyy-MM-dd HH:mm</b>, then <b>|</b>, then the event Title.</li><li>After the loop add <b>Combine Text</b> (New Lines), then <b>Copy to Clipboard</b>.</li><li>Run it, come back here and tap Paste.</li></ol>
+<textarea id="calt" rows="4" placeholder="2026-10-31 09:30|Dentist"></textarea>
+<div class="row" style="margin-bottom:14px"><button type="button" class="ghost" id="calp">Paste from clipboard</button><button type="button" id="cali">Import</button></div>
+<h2 style="font-size:16px">Any phone: import a file</h2>
+<p class="mute">Export your calendar as an .ics file (Google Calendar: Settings, then Import and export) and pick it here.</p>
+<div class="row"><label class="ghost small" style="border:1px solid var(--line);border-radius:12px;padding:8px 12px;cursor:pointer;color:var(--ink)">Choose .ics file<input type="file" accept=".ics,text/calendar" id="ics" hidden></label><button type="button" class="ghost" onclick="$('#dlg').close()">Close</button></div>`;
+d.showModal();
+$('#calp').onclick=async()=>{try{$('#calt').value=await navigator.clipboard.readText()}catch{toast('Paste blocked. Long-press the box and choose Paste.')}};
+$('#cali').onclick=async()=>{const ev=[];lines($('#calt').value).forEach(l=>{const m=l.match(/^(?:(\d{4}-\d{2}-\d{2})[ T])?(\d{1,2}:\d{2})\s*\|\s*(.+)$/);if(m)ev.push({id:uid(),date:m[1]||dkey(),time:m[2].padStart(5,'0'),title:m[3].trim(),items:[]})});
+if(!ev.length)return toast('No events found. Use one per line like 09:30|Dentist');
+const dates=new Set(ev.map(e=>e.date));S.events=S.events.filter(e=>!dates.has(e.date)).concat(ev);persist();d.close();toast(ev.length+' events imported');
+if(K.key&&!S.noCalAI&&confirm('Send today\'s event titles to your AI provider to build checklists?'))for(const x of S.events.filter(e=>e.date===dkey())){const r=await ai(`List up to 6 items to bring for: ${x.title}. One per line, no numbering.`);if(r)x.items=lines(r).map(s=>s.replace(/^[-*•\d.\s]+/,''))}
+persist();render()}}
+
+function parseICS(t){t=t.replace(/\r?\n[ \t]/g,'');const out=[];t.split('BEGIN:VEVENT').slice(1).forEach(b=>{const s=(b.match(/SUMMARY[^:]*:(.*)/)||[])[1],st=(b.match(/DTSTART[^:]*:(\d{8})(T(\d{4}))?/)||[]);if(!s||!st[1])return;
+const D=st[1],date=`${D.slice(0,4)}-${D.slice(4,6)}-${D.slice(6,8)}`,time=st[3]?st[3].slice(0,2)+':'+st[3].slice(2):'';out.push({id:uid(),title:s.trim().replace(/\\,/g,','),date,time,items:[]})});return out}
+document.addEventListener('change',async e=>{if(e.target.id==='ics'){const f=e.target.files[0];if(!f)return;const ev=parseICS(await f.text()),from=dkey();
+S.events=ev.filter(x=>x.date>=from);persist();$('#dlg').close();toast(S.events.length+' upcoming events imported');
+if(K.key&&!S.noCalAI&&confirm('Send today\'s event titles to your AI provider to build checklists?'))for(const x of S.events.filter(e=>e.date===from)){const r=await ai(`List up to 6 items to bring for: ${x.title}. One per line, no numbering.`);if(r)x.items=lines(r).map(s=>s.replace(/^[-*•\d.\s]+/,''))}
+persist();render()}
+else if(e.target.matches('.item input')){const k=dkey()+'|'+e.target.dataset.c;S.ticks[k]=S.ticks[k]||{};S.ticks[k][e.target.dataset.i]=e.target.checked;persist();render()}});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-snooze]');if(b){S.snooze[dkey()+'|'+b.dataset.snooze]=Date.now()+5*60000;persist();toast('Snoozed for 5 minutes')}
+const n=e.target.closest('nav button');if(n){tab=n.dataset.t;render()}});
+/* ---------- home, notifications, leaving-home ---------- */
+function setHome(){navigator.geolocation?.getCurrentPosition(p=>{S.home={lat:p.coords.latitude,lon:p.coords.longitude};persist();loadWeather();render();toast('Home saved on this device')},()=>toast('Location blocked. Allow it in your browser settings.'))}
+async function askNotif(){if(!('Notification' in window))return toast('Notifications are not supported here');await Notification.requestPermission();render()}
+async function notify(title,body,tag){if(!('Notification' in window)||Notification.permission!=='granted')return toast(title+': '+body);
+try{const r=await navigator.serviceWorker?.ready;r?r.showNotification(title,{body,tag,icon:$('#ico').href}):new Notification(title,{body,tag})}catch{new Notification(title,{body,tag})}}
+function tick(){const now=new Date(),dk=dkey(),ex=expired();
+if(ex.length&&!S.fired['rev|'+mkey()]){S.fired['rev|'+mkey()]=1;persist();notify('New month: review your places','Keep or change your times for '+mkey()+'.','review')}cardsToday().forEach(c=>{if(!c.time)return;const [h,m]=c.time.split(':').map(Number),at=new Date();at.setHours(h,m,0,0);
+const diff=(at-now)/60000,k=dk+'|'+c.id,l=left(c).filter(i=>i.tag!=='last');if(!l.length)return;
+const p=S.places.find(x=>x.id===c.id),body=(p?.line?p.line+' ':'')+l.slice(0,5).map(i=>i.t).join(', ');
+if(diff<=10&&diff>-30&&!S.fired[k]){S.fired[k]=1;persist();notify('Leaving at '+c.time+': '+c.title,body,k)}
+else if(S.snooze[k]&&Date.now()>=S.snooze[k]){delete S.snooze[k];persist();notify('Snoozed: '+c.title,body,k)}})}
+let wasHome=false,watch=null;
+const dist=(a,b)=>{const R=6371e3,r=x=>x*Math.PI/180,dl=r(b.lat-a.lat),dn=r(b.lon-a.lon),q=Math.sin(dl/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(q))};
+function toggleLoc(on){S.locOn=on;persist();startLoc()}
+function startLoc(){if(watch!=null){navigator.geolocation.clearWatch(watch);watch=null}
+if(!S.locOn||!S.home||!navigator.geolocation)return;
+watch=navigator.geolocation.watchPosition(p=>{const d=dist(S.home,{lat:p.coords.latitude,lon:p.coords.longitude});
+if(d<80)wasHome=true;else if(d>150&&wasHome){wasHome=false;const open=cardsToday().filter(c=>left(c).some(i=>i.tag!=='last'));
+notify('Did you take your keys?',open.length?'Still unticked on '+open[0].title:'Keys, wallet, phone, charger?','leave')}},()=>toast('Location unavailable'),{enableHighAccuracy:false,maximumAge:30000})}
+/* ---------- boot ---------- */
+render();loadWeather();startLoc();setInterval(tick,20000);tick();setInterval(loadWeather,3600000);
+</script>
+</body>
+</html>
