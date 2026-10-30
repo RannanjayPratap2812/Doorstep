@@ -117,7 +117,10 @@ function vSettings(){const home=S.home?`${S.home.lat.toFixed(3)}, ${S.home.lon.t
 $('#app').innerHTML=`<h1>Settings</h1>
 <div class="card"><h2>Home</h2><p class="mute">Saved on this device only: ${home}</p><button onclick="setHome()">Use my current location</button></div>
 <div class="card"><h2>Never-forget items</h2><p class="mute">Shown on every card. One per line.</p><textarea id="never" rows="4">${esc(S.never.join('\n'))}</textarea><button onclick="S.never=lines($('#never').value);persist();toast('Saved')">Save items</button></div>
-<div class="card"><h2>Notifications</h2><p class="mute">Status: ${'Notification' in window?Notification.permission:'not supported'}. Reminders fire 10 minutes before your leaving time while the app is open or installed.</p><button onclick="askNotif()">Allow notifications</button>
+<div class="card"><h2>Notifications</h2><p class="mute">Permission: ${'Notification' in window?Notification.permission:'not supported'}. ${S.last?'Last reminder: '+esc(S.last.t)+' ('+esc(S.last.title)+')':'No reminder has fired yet.'}</p>
+<label>Remind me<select onchange="S.lead=+this.value;persist()">${[[0,'At leaving time only'],[5,'5 minutes before, and at leaving time'],[10,'10 minutes before, and at leaving time'],[15,'15 minutes before, and at leaving time'],[30,'30 minutes before, and at leaving time']].map(([v,t])=>`<option value="${v}" ${(S.lead??10)===v?'selected':''}>${t}</option>`).join('')}</select></label>
+<div class="row"><button onclick="askNotif()">Allow notifications</button><button class="ghost" onclick="testNotif()">Send test</button></div>
+<p class="mute" style="margin-top:10px">Reminders only fire while Doorstep is open in a tab, or an installed app that is still running. If the browser is closed, nothing fires. On Windows, Focus Assist or Do Not Disturb can hide notifications.</p>
 <hr style="border:0;border-top:1px solid var(--line);margin:14px 0"><label class="row" style="color:var(--ink)"><span>Leaving-home alert (optional)<br><small class="mute">Asks for location. Works while the app is open.</small></span><input type="checkbox" ${S.locOn?'checked':''} onchange="toggleLoc(this.checked)" style="width:24px;height:24px"></label></div>
 <div class="card"><h2>AI key (optional, bring your own)</h2>
 <p style="margin:6px 0"><b>Doorstep has no built-in AI.</b> AI features only work with your own key, so they only ever use your own quota. Without a key, everything else still works offline.</p>
@@ -151,7 +154,7 @@ $('#aiI').onclick=async()=>{const n=$('#pn').value.trim();if(!n)return toast('En
 $('#aiL').onclick=async()=>{const n=$('#pn').value.trim();if(!n)return toast('Enter a place name first');const r=await ai(`Write one friendly reminder line under 12 words for someone about to leave for: ${n}. Items: ${$('#pi').value.replace(/\n/g,', ')}. Reply with the line only.`);if(r){p.line=r.trim();toast('Saved line: '+p.line)}};
 $('#ps').onclick=()=>{const name=$('#pn').value.trim();if(!name)return toast('Enter a place name');if(!A.some(i=>ck(i).checked))return toast('Tick at least one day');
 Object.assign(p,{name,items:lines($('#pi').value),returns:lines($('#pr').value),sched:Object.fromEntries(A.filter(i=>ck(i).checked).map(i=>[i,tm(i).value||'07:40'])),until:$('#pu').value});
-if(!S.places.includes(p))S.places.push(p);persist();d.close();render()};
+if(!S.places.includes(p))S.places.push(p);Object.keys(S.fired).filter(k=>k.startsWith(dkey()+'|'+p.id)).forEach(k=>delete S.fired[k]);persist();d.close();render()};
 if(id)$('#pd').onclick=()=>{S.places=S.places.filter(x=>x!==p);persist();d.close();render()}}
 /* ---------- AI (optional, BYOK) ---------- */
 async function ai(prompt){if(!K.key)return toast('Add an AI key in Settings first'),null;
@@ -194,15 +197,22 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-snooze]');
 const n=e.target.closest('nav button');if(n){tab=n.dataset.t;render()}});
 /* ---------- home, notifications, leaving-home ---------- */
 function setHome(){navigator.geolocation?.getCurrentPosition(p=>{S.home={lat:p.coords.latitude,lon:p.coords.longitude};persist();loadWeather();render();toast('Home saved on this device')},()=>toast('Location blocked. Allow it in your browser settings.'))}
-async function askNotif(){if(!('Notification' in window))return toast('Notifications are not supported here');await Notification.requestPermission();render()}
-async function notify(title,body,tag){if(!('Notification' in window)||Notification.permission!=='granted')return toast(title+': '+body);
-try{const r=await navigator.serviceWorker?.ready;r?r.showNotification(title,{body,tag,icon:$('#ico').href}):new Notification(title,{body,tag})}catch{new Notification(title,{body,tag})}}
+async function askNotif(){if(!('Notification' in window))return toast('Notifications are not supported here');const r=await Notification.requestPermission();toast(r==='granted'?'Notifications allowed':'Notifications are '+r+'. Change this in your browser site settings.');render()}
+async function notify(title,body,tag){S.last={t:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),title};persist();
+toast(title+': '+body);try{navigator.vibrate?.([200,100,200])}catch{}
+if(!('Notification' in window)||Notification.permission!=='granted')return false;
+try{const r=await Promise.race([navigator.serviceWorker?.ready,new Promise(x=>setTimeout(x,1500))]);
+if(r?.showNotification){await r.showNotification(title,{body,tag,icon:$('#ico').href,requireInteraction:true});return true}}catch{}
+try{new Notification(title,{body,tag});return true}catch{return false}}
+async function testNotif(){const ok=await notify('Doorstep test','If you can see this, reminders work.','test');if(!ok)toast('Browser notifications are not allowed. Allow them in your browser site settings, then try again.')}
 function tick(){const now=new Date(),dk=dkey(),ex=expired();
 if(ex.length&&!S.fired['rev|'+mkey()]){S.fired['rev|'+mkey()]=1;persist();notify('New month: review your places','Keep or change your times for '+mkey()+'.','review')}cardsToday().forEach(c=>{if(!c.time)return;const [h,m]=c.time.split(':').map(Number),at=new Date();at.setHours(h,m,0,0);
 const diff=(at-now)/60000,k=dk+'|'+c.id,l=left(c).filter(i=>i.tag!=='last');if(!l.length)return;
 const p=S.places.find(x=>x.id===c.id),body=(p?.line?p.line+' ':'')+l.slice(0,5).map(i=>i.t).join(', ');
-if(diff<=10&&diff>-30&&!S.fired[k]){S.fired[k]=1;persist();notify('Leaving at '+c.time+': '+c.title,body,k)}
-else if(S.snooze[k]&&Date.now()>=S.snooze[k]){delete S.snooze[k];persist();notify('Snoozed: '+c.title,body,k)}})}
+const lead=S.lead??10;
+if(lead>0&&diff<=lead&&diff>0&&!S.fired[k+'|pre']){S.fired[k+'|pre']=1;persist();notify('Leaving at '+c.time+': '+c.title,body,k+'pre')}
+if(diff<=0&&diff>-30&&!S.fired[k+'|go']){S.fired[k+'|go']=1;persist();notify('Time to go: '+c.title,body,k+'go')}
+if(S.snooze[k]&&Date.now()>=S.snooze[k]){delete S.snooze[k];persist();notify('Snoozed: '+c.title,body,k+'snz')}})}
 let wasHome=false,watch=null;
 const dist=(a,b)=>{const R=6371e3,r=x=>x*Math.PI/180,dl=r(b.lat-a.lat),dn=r(b.lon-a.lon),q=Math.sin(dl/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(q))};
 function toggleLoc(on){S.locOn=on;persist();startLoc()}
@@ -212,7 +222,7 @@ watch=navigator.geolocation.watchPosition(p=>{const d=dist(S.home,{lat:p.coords.
 if(d<80)wasHome=true;else if(d>150&&wasHome){wasHome=false;const open=cardsToday().filter(c=>left(c).some(i=>i.tag!=='last'));
 notify('Did you take your keys?',open.length?'Still unticked on '+open[0].title:'Keys, wallet, phone, charger?','leave')}},()=>toast('Location unavailable'),{enableHighAccuracy:false,maximumAge:30000})}
 /* ---------- boot ---------- */
-render();loadWeather();startLoc();setInterval(tick,20000);tick();setInterval(loadWeather,3600000);
+render();loadWeather();startLoc();setInterval(tick,15000);tick();document.addEventListener('visibilitychange',tick);addEventListener('focus',tick);setInterval(loadWeather,3600000);
 </script>
 </body>
 </html>
